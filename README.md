@@ -6,7 +6,7 @@ Dashboard-kort for Home Assistant. Det viser valgte enheter, en bryter som slår
 - Rød glød når alarm eller brannalarm er utløst. De vises heller ikke.
 - En temperatursensor kan overstyre «Er nå» fra klimaet.
 
-[！[Åpne i Marketplace](https://my.home-assistant.io/badges/marketplace_repository.svg)](https://my.home-assistant.io/redirect/marketplace_repository/?owner=RunarG3&repository=glow-climate-card&category=plugin)
+[![Åpne i Marketplace](https://my.home-assistant.io/badges/marketplace_repository.svg)](https://my.home-assistant.io/redirect/marketplace_repository/?owner=RunarG3&repository=glow-climate-card&category=plugin)
 
 ## Installer fra Marketplace
 
