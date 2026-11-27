@@ -285,7 +285,11 @@ class GlowClimateCard extends HTMLElement {
     mode.textContent = HVAC_LABELS[action] || action || "";
     const now = document.createElement("span");
     now.className = "now";
-    now.textContent = `Er nå ${formatTemp(this._currentTemp(climate))}`;
+    const nowLabel = document.createElement("span");
+    nowLabel.textContent = "Er nå ";
+    const nowValue = document.createElement("strong");
+    nowValue.textContent = formatTemp(this._currentTemp(climate));
+    now.append(nowLabel, nowValue);
     this._mode.append(mode, now);
 
     if (this._autoButton) {
@@ -501,7 +505,8 @@ ha-card {
 .header { gap: 12px; min-height: 48px; }
 .name { font-size: 1.15rem; font-weight: 600; line-height: 1.2; }
 .mode { color: var(--secondary-text-color); font-size: 0.85rem; display: flex; gap: 8px; margin-top: 2px; }
-.now { color: var(--secondary-text-color); }
+.now { color: var(--secondary-text-color); font-size: 1rem; }
+.now strong { color: var(--primary-text-color); font-weight: 700; }
 .auto { margin-left: auto; gap: 8px; }
 .auto-word { color: var(--secondary-text-color); min-width: 2.4rem; }
 .switch {
@@ -549,7 +554,7 @@ ha-icon.active { color: var(--state-icon-active-color, var(--state-light-active-
 }
 .scale { display: grid; grid-template-columns: 1fr auto 1fr; align-items: baseline; color: var(--secondary-text-color); }
 .scale span:last-child { justify-self: end; }
-.setpoint { justify-self: center; color: var(--primary-text-color); font-size: 1.45rem; font-weight: 600; }
+.setpoint { justify-self: center; color: var(--primary-text-color); font-size: 1.85rem; font-weight: 700; }
 .missing { padding: 16px; color: var(--secondary-text-color); }
 `;
 
