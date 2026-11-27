@@ -2,8 +2,9 @@
 
 Dashboard-kort for Home Assistant. Det viser valgte enheter, en bryter som slår valgte automatiseringer av og på, og en glidebryter for måltemperatur.
 
-- Gul glød når bevegelsessensoren er på. Sensoren vises ikke på kortet.
-- Rød glød når alarm eller brannalarm er utløst. De vises heller ikke.
+- Gul glød utenpå kortet når bevegelsessensoren er på. Kortflaten beholder temafargen. Sensoren vises ikke.
+- Rød glød utenpå kortet når alarm eller brannalarm er utløst. Rød har prioritet. De vises heller ikke.
+- Knappen «Slå av ovner» setter klimaet, og flere ovner hvis du har valgt dem, til av. «Slå på ovner» setter dem tilbake til varme.
 - En temperatursensor kan overstyre «Er nå» fra klimaet.
 
 [![Åpne i Marketplace](https://my.home-assistant.io/badges/marketplace_repository.svg)](https://my.home-assistant.io/redirect/marketplace_repository/?owner=RunarG3&repository=glow-climate-card&category=plugin)
@@ -36,6 +37,9 @@ automations:
 entities:
   - light.stue_tak
   - cover.stue_persienner
+ovens:
+  - climate.stue
+  - switch.stue_ovn
 ```
 
 | Felt | Betydning |
@@ -46,3 +50,4 @@ entities:
 | `alarm_entity` / `fire_entity` | Valgfrie. Rød glød, vises ikke. |
 | `automations` | Bryteren øverst slår alle av eller på. |
 | `entities` | Lys, persienner og andre enheter på kortet. |
+| `ovens` | Ovner som knappen «Slå av ovner» styrer, i tillegg til klimaet. |

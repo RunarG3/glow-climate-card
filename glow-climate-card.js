@@ -50,6 +50,15 @@ const SCHEMA = [
     selector: { entity: { multiple: true, filter: [{ domain: "automation" }] } },
   },
   { name: "entities", selector: { entity: { multiple: true } } },
+  {
+    name: "ovens",
+    selector: {
+      entity: {
+        multiple: true,
+        filter: [{ domain: "climate" }, { domain: "switch" }, { domain: "input_boolean" }],
+      },
+    },
+  },
 ];
 
 const LABELS = {
@@ -61,6 +70,7 @@ const LABELS = {
   fire_entity: "Brannalarm",
   automations: "Automatiseringer",
   entities: "Entiteter",
+  ovens: "Ovner",
 };
 
 function entityList(value) {
@@ -109,7 +119,8 @@ class GlowClimateCard extends HTMLElement {
   set hass(hass) {
     this._hass = hass;
     if (!this._config) return;
-    if (this._slider && document.activeElement === this._slider) {
+    const active = (this.shadowRoot && this.shadowRoot.activeElement) || document.activeElement;
+    if (this._slider && active === this._slider) {
       this._updateHeader();
       this._updateEntities();
       this._updateGlow();
@@ -141,6 +152,8 @@ class GlowClimateCard extends HTMLElement {
       return;
     }
 
+    const shell = document.createElement("div");
+    shell.className = "glow-shell";
     const root = document.createElement("ha-card");
     const header = document.createElement("div");
     header.className = "header";
@@ -208,28 +221,44 @@ class GlowClimateCard extends HTMLElement {
     scale.append(minLabel, setpoint, maxLabel);
     sliderBlock.append(slider, scale);
 
-    root.append(header, list, sliderBlock);
-    this.replaceChildren(root);
-    if (!this._style) {
-      const style = document.createElement("style");
-      style.textContent = CARD_STYLE;
-      this.append(style);
-      this._style = style;
-    } else {
-      this.append(this._style);
-    }
+    const ovenButton = document.createElement("button");
+    ovenButton.type = "button";
+    ovenButton.className = "oven-btn";
+    ovenButton.addEventListener("click", (event) => {
+      event.stopPropagation();
+      this._toggleOvens();
+    });
 
-    this._card = root;
+    root.append(header, list, ovenButton, sliderBlock);
+    shell.append(root);
+    const shadow = this._shadow();
+    for (const node of [...shadow.childNodes]) {
+      if (node.nodeName !== "STYLE") node.remove();
+    }
+    shadow.append(shell);
+
+    this._card = shell;
     this._name = name;
     this._mode = mode;
     this._list = list;
     this._slider = slider;
     this._setpoint = setpoint;
     this._sliderBlock = sliderBlock;
+    this._ovenButton = ovenButton;
     this._updateHeader();
     this._updateEntities();
     this._updateGlow();
     this._updateSlider(climate, min, max);
+  }
+
+  _shadow() {
+    if (!this.shadowRoot) {
+      const shadow = this.attachShadow({ mode: "open" });
+      const style = document.createElement("style");
+      style.textContent = CARD_STYLE;
+      shadow.append(style);
+    }
+    return this.shadowRoot;
   }
 
   _renderMessage(text) {
@@ -238,7 +267,11 @@ class GlowClimateCard extends HTMLElement {
     note.className = "missing";
     note.textContent = text;
     card.append(note);
-    this.replaceChildren(card);
+    const shadow = this._shadow();
+    for (const node of [...shadow.childNodes]) {
+      if (node.nodeName !== "STYLE") node.remove();
+    }
+    shadow.append(card);
     this._slider = null;
   }
 
@@ -261,6 +294,13 @@ class GlowClimateCard extends HTMLElement {
       this._autoButton.classList.toggle("on", on);
       this._autoButton.setAttribute("aria-checked", on ? "true" : "false");
       this._autoWord.textContent = on ? "Auto" : "Av";
+    }
+    if (this._ovenButton) {
+      const anyOn = this._ovensOn();
+      this._ovenButton.textContent = anyOn ? "Slå av ovner" : "Slå på ovner";
+    }
+    if (this._slider && climate) {
+      this._slider.disabled = climate.state === "off";
     }
   }
 
@@ -343,6 +383,45 @@ class GlowClimateCard extends HTMLElement {
     }
   }
 
+  _ovenIds() {
+    return [...new Set([this._config.entity, ...entityList(this._config.ovens)].filter(Boolean))];
+  }
+
+  _ovenIsOn(stateObj) {
+    if (!stateObj || stateObj.state === "unavailable" || stateObj.state === "unknown") return false;
+    if (domainOf(stateObj.entity_id) === "climate") return stateObj.state !== "off";
+    return stateObj.state === "on";
+  }
+
+  _ovensOn() {
+    return this._ovenIds().some((id) => this._ovenIsOn(this._hass.states[id]));
+  }
+
+  _toggleOvens() {
+    const turnOff = this._ovensOn();
+    for (const entityId of this._ovenIds()) {
+      const stateObj = this._hass.states[entityId];
+      if (domainOf(entityId) === "climate") {
+        const modes = (stateObj && stateObj.attributes.hvac_modes) || ["heat", "off"];
+        if (turnOff) {
+          if (modes.includes("off")) {
+            this._hass.callService("climate", "set_hvac_mode", { entity_id: entityId, hvac_mode: "off" });
+          } else {
+            this._hass.callService("climate", "turn_off", { entity_id: entityId });
+          }
+        } else if (modes.includes("heat")) {
+          this._hass.callService("climate", "set_hvac_mode", { entity_id: entityId, hvac_mode: "heat" });
+        } else {
+          const next = modes.find((mode) => mode !== "off");
+          if (next) this._hass.callService("climate", "set_hvac_mode", { entity_id: entityId, hvac_mode: next });
+          else this._hass.callService("climate", "turn_on", { entity_id: entityId });
+        }
+      } else {
+        this._hass.callService("homeassistant", turnOff ? "turn_off" : "turn_on", { entity_id: entityId });
+      }
+    }
+  }
+
   _moreInfo(entityId) {
     const event = new Event("hass-more-info", { bubbles: true, composed: true });
     event.detail = { entityId };
@@ -385,21 +464,35 @@ class GlowClimateCardEditor extends HTMLElement {
 }
 
 const CARD_STYLE = `
+:host, glow-climate-card {
+  display: block;
+}
+.glow-shell {
+  border-radius: var(--ha-card-border-radius, var(--ha-border-radius, 12px));
+  background: transparent;
+}
+.glow-shell.motion {
+  box-shadow:
+    0 0 0 1px rgba(245, 197, 66, 0.8),
+    0 0 12px 0 rgba(245, 197, 66, 0.45);
+}
+.glow-shell.alarm {
+  box-shadow:
+    0 0 0 1px rgba(226, 59, 59, 0.85),
+    0 0 12px 0 rgba(226, 59, 59, 0.45);
+}
 ha-card {
+  position: relative;
+  z-index: 1;
   padding: 12px 16px 14px;
   color: var(--primary-text-color);
-}
-ha-card.motion {
-  box-shadow:
-    0 0 0 1px rgba(245, 197, 66, 0.55),
-    0 0 22px 2px rgba(245, 197, 66, 0.45),
-    0 0 56px 8px rgba(245, 197, 66, 0.22);
-}
-ha-card.alarm {
-  box-shadow:
-    0 0 0 1px rgba(226, 59, 59, 0.65),
-    0 0 22px 2px rgba(226, 59, 59, 0.5),
-    0 0 56px 8px rgba(226, 59, 59, 0.28);
+  border-radius: var(--ha-card-border-radius, var(--ha-border-radius, 12px));
+  background-color: var(--primary-background-color, Canvas) !important;
+  background-image: linear-gradient(
+    var(--ha-card-background, var(--card-background-color, transparent)),
+    var(--ha-card-background, var(--card-background-color, transparent))
+  ) !important;
+  box-shadow: var(--ha-card-box-shadow, none) !important;
 }
 .header, .auto, .row, .scale {
   display: flex;
@@ -427,12 +520,25 @@ ha-icon { color: var(--state-icon-color, var(--secondary-text-color)); }
 ha-icon.active { color: var(--state-icon-active-color, var(--state-light-active-color, #ffb74d)); }
 .row-name { font-size: 1rem; }
 .row-value { color: var(--primary-text-color); }
+.oven-btn {
+  width: 100%;
+  min-height: 44px;
+  margin-top: 10px;
+  border: 0;
+  border-radius: 12px;
+  background: var(--secondary-background-color, rgba(127, 127, 127, 0.16));
+  color: var(--primary-text-color);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
 .slider-block { margin-top: 8px; }
 .temp-slider {
   -webkit-appearance: none; appearance: none; width: 100%; height: 4px; border-radius: 999px;
   background: linear-gradient(to right, var(--state-climate-heat-color, #e39a45) var(--fill, 40%), var(--divider-color, #4a4a50) var(--fill, 40%));
   outline: none;
 }
+.temp-slider:disabled { opacity: 0.4; }
 .temp-slider::-webkit-slider-thumb {
   -webkit-appearance: none; width: 22px; height: 22px; border-radius: 999px; background: #fff;
   box-shadow: 0 1px 4px rgba(0,0,0,.4); cursor: pointer;
