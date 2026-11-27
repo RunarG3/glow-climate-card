@@ -40,7 +40,7 @@ const TOGGLE_DOMAINS = new Set(["light", "switch", "fan", "input_boolean", "sire
 
 const SCHEMA = [
   { name: "name", selector: { text: {} } },
-  { name: "entity", required: true, selector: { entity: { filter: [{ domain: "climate" }] } } },
+  { name: "entity", selector: { entity: { filter: [{ domain: "climate" }] } } },
   { name: "motion_entity", selector: { entity: { filter: [{ domain: "binary_sensor" }] } } },
   { name: "temperature_entity", selector: { entity: { filter: [{ domain: "sensor" }] } } },
   { name: "alarm_entity", selector: { entity: { filter: [{ domain: "binary_sensor" }, { domain: "alarm_control_panel" }] } } },
@@ -110,7 +110,7 @@ class GlowClimateCard extends HTMLElement {
   static getStubConfig(hass) {
     const states = (hass && hass.states) || {};
     const entity = Object.keys(states).find((id) => id.startsWith("climate.")) || "";
-    return { entity };
+    return entity ? { entity } : {};
   }
 
   setConfig(config) {
@@ -149,9 +149,9 @@ class GlowClimateCard extends HTMLElement {
 
   _render() {
     if (!this._hass || !this._config) return;
-    const climate = this._climate();
-    if (!this._config.entity || !climate) {
-      this._renderMessage(this._config.entity ? `Fant ikke ${this._config.entity}` : "Velg et klima i kortkonfigurasjonen");
+    const climate = this._config.entity ? this._climate() : null;
+    if (this._config.entity && !climate) {
+      this._renderMessage(`Fant ikke ${this._config.entity}`);
       return;
     }
 
@@ -194,37 +194,45 @@ class GlowClimateCard extends HTMLElement {
 
     const list = document.createElement("div");
     list.className = "entities";
-    const sliderBlock = document.createElement("div");
-    sliderBlock.className = "slider-block";
-    const slider = document.createElement("input");
-    slider.type = "range";
-    slider.className = "temp-slider";
-    const min = Number(climate.attributes.min_temp ?? 7);
-    const max = Number(climate.attributes.max_temp ?? 35);
-    const step = Number(climate.attributes.target_temp_step ?? 0.5);
-    slider.min = String(min);
-    slider.max = String(max);
-    slider.step = String(step);
-    slider.addEventListener("input", () => {
-      this._setpoint.textContent = formatTemp(slider.value);
-      sliderBlock.style.setProperty("--fill", `${((slider.value - min) / (max - min)) * 100}%`);
-    });
-    slider.addEventListener("change", () => {
-      this._hass.callService("climate", "set_temperature", {
-        entity_id: this._config.entity,
-        temperature: Number(slider.value),
+
+    let slider = null;
+    let setpoint = null;
+    let sliderBlock = null;
+    let min = 7;
+    let max = 35;
+    if (climate) {
+      sliderBlock = document.createElement("div");
+      sliderBlock.className = "slider-block";
+      slider = document.createElement("input");
+      slider.type = "range";
+      slider.className = "temp-slider";
+      min = Number(climate.attributes.min_temp ?? 7);
+      max = Number(climate.attributes.max_temp ?? 35);
+      const step = Number(climate.attributes.target_temp_step ?? 0.5);
+      slider.min = String(min);
+      slider.max = String(max);
+      slider.step = String(step);
+      slider.addEventListener("input", () => {
+        if (this._setpoint) this._setpoint.textContent = formatTemp(slider.value);
+        sliderBlock.style.setProperty("--fill", `${((slider.value - min) / (max - min)) * 100}%`);
       });
-    });
-    const scale = document.createElement("div");
-    scale.className = "scale";
-    const minLabel = document.createElement("span");
-    minLabel.textContent = `${min}°`;
-    const setpoint = document.createElement("span");
-    setpoint.className = "setpoint";
-    const maxLabel = document.createElement("span");
-    maxLabel.textContent = `${max}°`;
-    scale.append(minLabel, setpoint, maxLabel);
-    sliderBlock.append(slider, scale);
+      slider.addEventListener("change", () => {
+        this._hass.callService("climate", "set_temperature", {
+          entity_id: this._config.entity,
+          temperature: Number(slider.value),
+        });
+      });
+      const scale = document.createElement("div");
+      scale.className = "scale";
+      const minLabel = document.createElement("span");
+      minLabel.textContent = `${min}°`;
+      setpoint = document.createElement("span");
+      setpoint.className = "setpoint";
+      const maxLabel = document.createElement("span");
+      maxLabel.textContent = `${max}°`;
+      scale.append(minLabel, setpoint, maxLabel);
+      sliderBlock.append(slider, scale);
+    }
 
     const ovens = document.createElement("div");
     ovens.className = "ovens";
@@ -232,7 +240,7 @@ class GlowClimateCard extends HTMLElement {
 
     root.append(header, list, ovens);
     if (media) root.append(media);
-    root.append(sliderBlock);
+    if (sliderBlock) root.append(sliderBlock);
     shell.append(root);
     const shadow = this._shadow();
     for (const node of [...shadow.childNodes]) {
@@ -253,7 +261,7 @@ class GlowClimateCard extends HTMLElement {
     this._updateEntities();
     this._updateOvens();
     this._updateGlow();
-    this._updateSlider(climate, min, max);
+    if (climate && slider) this._updateSlider(climate, min, max);
   }
 
   _shadow() {
@@ -282,10 +290,19 @@ class GlowClimateCard extends HTMLElement {
   }
 
   _updateHeader() {
-    const climate = this._climate();
-    if (!climate || !this._name) return;
-    this._name.textContent = this._config.name || climate.attributes.friendly_name || "Klima";
-    if (this._now) this._now.textContent = formatTemp(this._currentTemp(climate));
+    const climate = this._config.entity ? this._climate() : null;
+    if (!this._name) return;
+    this._name.textContent = this._config.name || (climate && climate.attributes.friendly_name) || "Klimakort";
+    const temp = this._currentTemp(climate);
+    if (this._now) {
+      if (Number.isFinite(Number(temp))) {
+        this._now.hidden = false;
+        this._now.textContent = formatTemp(temp);
+      } else {
+        this._now.hidden = true;
+        this._now.textContent = "";
+      }
+    }
 
     if (this._autoButton) {
       const ids = entityList(this._config.automations);

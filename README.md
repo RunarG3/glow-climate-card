@@ -46,7 +46,7 @@ media_player: media_player.stue
 
 | Felt | Betydning |
 | --- | --- |
-| `entity` | Klima. Glidebryteren setter måltemperaturen. |
+| `entity` | Klima, valgfri. Glidebryteren vises bare når et klima er valgt. |
 | `motion_entity` | Binær sensor. Gul glød, vises ikke. |
 | `temperature_entity` | Valgfri. Overstyrer temperaturen fra klima. |
 | `alarm_entity` / `fire_entity` | Valgfrie. Rød glød, vises ikke. |
