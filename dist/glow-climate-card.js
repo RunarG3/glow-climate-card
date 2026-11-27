@@ -521,16 +521,17 @@ ha-icon.active { color: var(--state-icon-active-color, var(--state-light-active-
 .row-name { font-size: 1rem; }
 .row-value { color: var(--primary-text-color); }
 .oven-btn {
-  width: 100%;
-  min-height: 44px;
-  margin-top: 10px;
+  display: block;
+  margin: 2px 0 0 auto;
+  padding: 2px 0;
   border: 0;
-  border-radius: 12px;
-  background: var(--secondary-background-color, rgba(127, 127, 127, 0.16));
-  color: var(--primary-text-color);
+  background: transparent;
+  color: var(--secondary-text-color);
   font: inherit;
-  font-weight: 600;
+  font-size: 0.78rem;
+  font-weight: 500;
   cursor: pointer;
+  opacity: 0.8;
 }
 .slider-block { margin-top: 8px; }
 .temp-slider {
