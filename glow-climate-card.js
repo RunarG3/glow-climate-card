@@ -59,6 +59,7 @@ const SCHEMA = [
       },
     },
   },
+  { name: "media_player", selector: { entity: { filter: [{ domain: "media_player" }] } } },
 ];
 
 const LABELS = {
@@ -71,6 +72,7 @@ const LABELS = {
   automations: "Automatiseringer",
   entities: "Entiteter",
   ovens: "Ovner",
+  media_player: "Mediespiller",
 };
 
 function entityList(value) {
@@ -120,9 +122,10 @@ class GlowClimateCard extends HTMLElement {
     this._hass = hass;
     if (!this._config) return;
     const active = (this.shadowRoot && this.shadowRoot.activeElement) || document.activeElement;
-    if (this._slider && active === this._slider) {
+    if ((this._slider && active === this._slider) || (this._volume && active === this._volume)) {
       this._updateHeader();
       this._updateEntities();
+      this._updateOvens();
       this._updateGlow();
       return;
     }
@@ -157,13 +160,6 @@ class GlowClimateCard extends HTMLElement {
     const root = document.createElement("ha-card");
     const header = document.createElement("div");
     header.className = "header";
-    const titles = document.createElement("div");
-    const name = document.createElement("div");
-    name.className = "name";
-    const mode = document.createElement("div");
-    mode.className = "mode";
-    titles.append(name, mode);
-    header.append(titles);
 
     const automations = entityList(this._config.automations);
     if (automations.length) {
@@ -185,7 +181,16 @@ class GlowClimateCard extends HTMLElement {
       header.append(wrap);
       this._autoButton = button;
       this._autoWord = word;
+    } else {
+      this._autoButton = null;
+      this._autoWord = null;
     }
+
+    const name = document.createElement("div");
+    name.className = "name";
+    const now = document.createElement("div");
+    now.className = "now";
+    header.append(name, now);
 
     const list = document.createElement("div");
     list.className = "entities";
@@ -221,15 +226,13 @@ class GlowClimateCard extends HTMLElement {
     scale.append(minLabel, setpoint, maxLabel);
     sliderBlock.append(slider, scale);
 
-    const ovenButton = document.createElement("button");
-    ovenButton.type = "button";
-    ovenButton.className = "oven-btn";
-    ovenButton.addEventListener("click", (event) => {
-      event.stopPropagation();
-      this._toggleOvens();
-    });
+    const ovens = document.createElement("div");
+    ovens.className = "ovens";
+    const media = this._mediaBlock();
 
-    root.append(header, list, ovenButton, sliderBlock);
+    root.append(header, list, ovens);
+    if (media) root.append(media);
+    root.append(sliderBlock);
     shell.append(root);
     const shadow = this._shadow();
     for (const node of [...shadow.childNodes]) {
@@ -239,14 +242,16 @@ class GlowClimateCard extends HTMLElement {
 
     this._card = shell;
     this._name = name;
-    this._mode = mode;
+    this._now = now;
     this._list = list;
+    this._ovens = ovens;
     this._slider = slider;
     this._setpoint = setpoint;
     this._sliderBlock = sliderBlock;
-    this._ovenButton = ovenButton;
+    this._volume = media ? media.querySelector("input") : null;
     this._updateHeader();
     this._updateEntities();
+    this._updateOvens();
     this._updateGlow();
     this._updateSlider(climate, min, max);
   }
@@ -273,24 +278,14 @@ class GlowClimateCard extends HTMLElement {
     }
     shadow.append(card);
     this._slider = null;
+    this._volume = null;
   }
 
   _updateHeader() {
     const climate = this._climate();
     if (!climate || !this._name) return;
-    const action = climate.attributes.hvac_action || climate.state;
     this._name.textContent = this._config.name || climate.attributes.friendly_name || "Klima";
-    this._mode.textContent = "";
-    const mode = document.createElement("span");
-    mode.textContent = HVAC_LABELS[action] || action || "";
-    const now = document.createElement("span");
-    now.className = "now";
-    const nowLabel = document.createElement("span");
-    nowLabel.textContent = "Er nå ";
-    const nowValue = document.createElement("strong");
-    nowValue.textContent = formatTemp(this._currentTemp(climate));
-    now.append(nowLabel, nowValue);
-    this._mode.append(mode, now);
+    if (this._now) this._now.textContent = formatTemp(this._currentTemp(climate));
 
     if (this._autoButton) {
       const ids = entityList(this._config.automations);
@@ -298,10 +293,6 @@ class GlowClimateCard extends HTMLElement {
       this._autoButton.classList.toggle("on", on);
       this._autoButton.setAttribute("aria-checked", on ? "true" : "false");
       this._autoWord.textContent = on ? "Auto" : "Av";
-    }
-    if (this._ovenButton) {
-      const anyOn = this._ovensOn();
-      this._ovenButton.textContent = anyOn ? "Slå av ovner" : "Slå på ovner";
     }
     if (this._slider && climate) {
       this._slider.disabled = climate.state === "off";
@@ -312,7 +303,8 @@ class GlowClimateCard extends HTMLElement {
     if (!this._list) return;
     this._list.replaceChildren();
     for (const entityId of entityList(this._config.entities)) {
-      if (entityId === this._config.entity) continue;
+      if (entityId === this._config.entity || entityId === this._config.media_player) continue;
+      if (this._ovenIds().includes(entityId)) continue;
       const stateObj = this._hass.states[entityId];
       this._list.append(this._entityRow(entityId, stateObj));
     }
@@ -388,7 +380,9 @@ class GlowClimateCard extends HTMLElement {
   }
 
   _ovenIds() {
-    return [...new Set([this._config.entity, ...entityList(this._config.ovens)].filter(Boolean))];
+    const configured = entityList(this._config.ovens);
+    if (configured.length) return [...new Set(configured)];
+    return this._config.entity ? [this._config.entity] : [];
   }
 
   _ovenIsOn(stateObj) {
@@ -397,32 +391,86 @@ class GlowClimateCard extends HTMLElement {
     return stateObj.state === "on";
   }
 
-  _ovensOn() {
-    return this._ovenIds().some((id) => this._ovenIsOn(this._hass.states[id]));
-  }
-
-  _toggleOvens() {
-    const turnOff = this._ovensOn();
+  _updateOvens() {
+    if (!this._ovens) return;
+    this._ovens.replaceChildren();
     for (const entityId of this._ovenIds()) {
       const stateObj = this._hass.states[entityId];
-      if (domainOf(entityId) === "climate") {
-        const modes = (stateObj && stateObj.attributes.hvac_modes) || ["heat", "off"];
-        if (turnOff) {
-          if (modes.includes("off")) {
-            this._hass.callService("climate", "set_hvac_mode", { entity_id: entityId, hvac_mode: "off" });
-          } else {
-            this._hass.callService("climate", "turn_off", { entity_id: entityId });
-          }
-        } else if (modes.includes("heat")) {
-          this._hass.callService("climate", "set_hvac_mode", { entity_id: entityId, hvac_mode: "heat" });
+      const on = this._ovenIsOn(stateObj);
+      const row = document.createElement("div");
+      row.className = "oven-row";
+      const name = document.createElement("span");
+      name.className = "row-name";
+      name.textContent = (stateObj && stateObj.attributes.friendly_name) || entityId;
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = on ? "oven-icon on" : "oven-icon";
+      button.setAttribute("aria-label", on ? "Slå av ovn" : "Slå på ovn");
+      const icon = document.createElement("ha-icon");
+      icon.icon = on ? "mdi:radiator" : "mdi:radiator-off";
+      button.append(icon);
+      button.addEventListener("click", (event) => {
+        event.stopPropagation();
+        this._toggleOven(entityId);
+      });
+      row.append(name, button);
+      this._ovens.append(row);
+    }
+  }
+
+  _mediaBlock() {
+    const entityId = this._config.media_player;
+    const stateObj = entityId && this._hass.states[entityId];
+    if (!stateObj || stateObj.state !== "playing") return null;
+    const block = document.createElement("div");
+    block.className = "media";
+    const title = document.createElement("div");
+    title.className = "media-title";
+    const song = stateObj.attributes.media_title || "Ukjent spor";
+    const artist = stateObj.attributes.media_artist;
+    title.textContent = artist ? `${artist} — ${song}` : song;
+    const slider = document.createElement("input");
+    slider.type = "range";
+    slider.className = "vol-slider";
+    slider.min = "0";
+    slider.max = "1";
+    slider.step = "0.01";
+    const level = Number(stateObj.attributes.volume_level ?? 0.3);
+    slider.value = String(level);
+    slider.setAttribute("aria-label", "Volum");
+    const paint = () => block.style.setProperty("--vol", `${Number(slider.value) * 100}%`);
+    paint();
+    slider.addEventListener("input", paint);
+    slider.addEventListener("change", () => {
+      this._hass.callService("media_player", "volume_set", {
+        entity_id: entityId,
+        volume_level: Number(slider.value),
+      });
+    });
+    block.append(title, slider);
+    return block;
+  }
+
+  _toggleOven(entityId) {
+    const turnOff = this._ovenIsOn(this._hass.states[entityId]);
+    const stateObj = this._hass.states[entityId];
+    if (domainOf(entityId) === "climate") {
+      const modes = (stateObj && stateObj.attributes.hvac_modes) || ["heat", "off"];
+      if (turnOff) {
+        if (modes.includes("off")) {
+          this._hass.callService("climate", "set_hvac_mode", { entity_id: entityId, hvac_mode: "off" });
         } else {
-          const next = modes.find((mode) => mode !== "off");
-          if (next) this._hass.callService("climate", "set_hvac_mode", { entity_id: entityId, hvac_mode: next });
-          else this._hass.callService("climate", "turn_on", { entity_id: entityId });
+          this._hass.callService("climate", "turn_off", { entity_id: entityId });
         }
+      } else if (modes.includes("heat")) {
+        this._hass.callService("climate", "set_hvac_mode", { entity_id: entityId, hvac_mode: "heat" });
       } else {
-        this._hass.callService("homeassistant", turnOff ? "turn_off" : "turn_on", { entity_id: entityId });
+        const next = modes.find((mode) => mode !== "off");
+        if (next) this._hass.callService("climate", "set_hvac_mode", { entity_id: entityId, hvac_mode: next });
+        else this._hass.callService("climate", "turn_on", { entity_id: entityId });
       }
+    } else {
+      this._hass.callService("homeassistant", turnOff ? "turn_off" : "turn_on", { entity_id: entityId });
     }
   }
 
@@ -503,11 +551,16 @@ ha-card {
   align-items: center;
 }
 .header { gap: 12px; min-height: 48px; }
-.name { font-size: 1.15rem; font-weight: 600; line-height: 1.2; }
-.mode { color: var(--secondary-text-color); font-size: 0.85rem; display: flex; gap: 8px; margin-top: 2px; }
-.now { color: var(--secondary-text-color); font-size: 1rem; }
-.now strong { color: var(--primary-text-color); font-weight: 700; }
-.auto { margin-left: auto; gap: 8px; }
+.name { font-size: 1.15rem; font-weight: 600; line-height: 1.2; min-width: 0; }
+.now {
+  margin-left: auto;
+  color: var(--primary-text-color);
+  font-size: 1.85rem;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  white-space: nowrap;
+}
+.auto { gap: 8px; flex: none; }
 .auto-word { color: var(--secondary-text-color); min-width: 2.4rem; }
 .switch {
   width: 42px; height: 24px; border: 0; border-radius: 999px; padding: 2px;
@@ -525,18 +578,39 @@ ha-icon { color: var(--state-icon-color, var(--secondary-text-color)); }
 ha-icon.active { color: var(--state-icon-active-color, var(--state-light-active-color, #ffb74d)); }
 .row-name { font-size: 1rem; }
 .row-value { color: var(--primary-text-color); }
-.oven-btn {
-  display: block;
-  margin: 2px 0 0 auto;
-  padding: 2px 0;
+.oven-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 48px;
+}
+.oven-icon {
+  width: 36px;
+  height: 36px;
   border: 0;
+  border-radius: 999px;
   background: transparent;
   color: var(--secondary-text-color);
-  font: inherit;
-  font-size: 0.78rem;
-  font-weight: 500;
+  display: grid;
+  place-items: center;
   cursor: pointer;
-  opacity: 0.8;
+  padding: 0;
+}
+.oven-icon.on { color: var(--state-climate-heat-color, #e39a45); }
+.media { margin-top: 6px; }
+.media-title { font-size: 0.95rem; font-weight: 600; line-height: 1.3; }
+.vol-slider {
+  -webkit-appearance: none; appearance: none; width: 100%; height: 4px; border-radius: 999px; margin-top: 10px;
+  background: linear-gradient(to right, var(--primary-color, #4f8cff) var(--vol, 30%), var(--divider-color, #4a4a50) var(--vol, 30%));
+  outline: none;
+}
+.vol-slider::-webkit-slider-thumb {
+  -webkit-appearance: none; width: 18px; height: 18px; border-radius: 999px; background: #fff;
+  box-shadow: 0 1px 4px rgba(0,0,0,.4); cursor: pointer;
+}
+.vol-slider::-moz-range-thumb {
+  width: 18px; height: 18px; border: 0; border-radius: 999px; background: #fff; cursor: pointer;
 }
 .slider-block { margin-top: 8px; }
 .temp-slider {
@@ -565,6 +639,6 @@ window.customCards = window.customCards || [];
 window.customCards.push({
   type: "glow-climate-card",
   name: "Klimakort",
-  description: "Klima med glød for bevegelse og alarm, automatiseringsbryter og flere enheter",
+  description: "Klima med glød, automatisering, ovner og mediespiller",
   preview: true,
 });
